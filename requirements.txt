@@ -1,4 +1,4 @@
-kivy
 librespot
 pyaudio
 pydub
+tkinter
