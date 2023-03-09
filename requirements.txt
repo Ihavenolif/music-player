@@ -1,0 +1,4 @@
+kivy
+librespot
+pyaudio
+pydub
