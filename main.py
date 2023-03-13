@@ -12,10 +12,6 @@ from classes.song import Song
 from classes.player import Player
 from classes.images import Images
 
-if len(sys.argv) < 2:
-    print(f'Plays a wave file. Usage: {sys.argv[0]} filename.wav')
-    sys.exit(-1)
-
 player = Player()
 
 def audio_datalist_set_volume(datalist, volume):
@@ -45,8 +41,10 @@ def play_song():
 
         stream.close()
 
-thread = threading.Thread(target=play_song)
-thread.start()
+#thread = threading.Thread(target=play_song)
+#thread.start()
+
+player.QUEUE.append(Song(source="wav", title="kokot", author="kokotos", album="albumos", length=330, link="temp.wav"))
 
 Window.pause_label.bind("<Button-1>", lambda e:player.toggle_pause())
 
