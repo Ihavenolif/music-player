@@ -23,9 +23,17 @@ with wave.open(sys.argv[1], 'rb') as wf:
                     rate=wf.getframerate(),
                     output=True)
 
+    chunked_file = []
+
     # Play samples from the wave file (3)
     while len(data := wf.readframes(CHUNK)):  # Requires Python 3.8+ for :=
-        stream.write(data)
+        chunked_file.append(data)
+
+    for i in range(len(chunked_file)):
+        try:
+            print(f"Progress: {i}/{len(chunked_file)} ({(i/len(chunked_file))*100})")
+        except: pass
+        stream.write(chunked_file[i])
 
     # Close stream (4)
     stream.close()
