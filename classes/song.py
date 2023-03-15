@@ -1,5 +1,6 @@
 from pydub import AudioSegment
 from pydub.utils import make_chunks
+from PIL import Image as PILImg
 
 class Song:
     source:str
@@ -8,6 +9,7 @@ class Song:
     album:str
     length:int
     length_secs:int
+    image:PILImg
     link:str
     seg:AudioSegment
     chunked_file:list[AudioSegment]
@@ -15,7 +17,7 @@ class Song:
     finished_playing:bool = True
 
     def load(self):
-        if self.source in ["wav", "mp3", "aac", "mp4", "ogg"]:
+        if self.source in ("wav", "mp3", "aac", "mp4", "ogg"):
             self.seg = AudioSegment.from_file(file=self.link, format=self.source)
         elif self.source == "spotify":
             #spotify implementation
@@ -29,10 +31,11 @@ class Song:
         self.finished_playing = False
         self.progress = 0
 
-    def __init__(self, source:str, title:str, author:str, album:str, length:int, link:str) -> None:
+    def __init__(self, source:str, title:str, author:str, album:str, length:int, link:str, image:PILImg) -> None:
         self.source = source
         self.title = title
         self.author = author
         self.album = album
         self.length_secs = length
         self.link = link
+        self.image = image

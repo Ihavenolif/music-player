@@ -1,47 +1,90 @@
 import pyaudio
 import threading
 import time
+import tkinter as tk
+import music_tag
+
+from PIL import Image
+from tkinter.filedialog import askopenfilename
+
 from classes.song import Song
 from classes.images import Images
-from classes.window import Window
+from classes.window import Window, init_after_player
+
+
 
 class Player:
     QUEUE:list[Song] = []
     PA = pyaudio.PyAudio()
     CHUNK = 512
     PLAYING = False
-    song:Song = Song("", "", "", "", 0, "")
+    song:Song = Song("", "", "", "", 0, "", image=Image.new("RGB", (1000,1000), (255,255,255)))
 
     def __init__(self) -> None:
         pass
 
-    def play_song(self):
-        stream = self.PA.open(format=self.PA.get_format_from_width(self.song.seg.sample_width),
-                              channels=self.song.seg.channels,
-                              rate=self.song.seg.frame_rate,
+    def play_song():
+        stream = Player.PA.open(format=Player.PA.get_format_from_width(Player.song.seg.sample_width),
+                              channels=Player.song.seg.channels,
+                              rate=Player.song.seg.frame_rate,
                               output=True)
         
-        while self.song.progress < self.song.length:
-            while not self.PLAYING:
+        while Player.song.progress <= Player.song.length:
+            while not Player.PLAYING:
                 time.sleep(0.1)
-            stream.write(self.song.chunked_file[self.song.progress]._data)
-            self.song.progress += 1
+            stream.write(Player.song.chunked_file[Player.song.progress]._data)
+            Player.song.progress += 1
+            Window.progress_bar.step()
         
         stream.close()
-        self.song.finished_playing = True
+        Player.song.finished_playing = True
+        Player.load_song()
 
-    def toggle_pause(self):
-        if self.PLAYING:
+    def add_to_queue(song:Song):
+        Player.QUEUE.append(song)
+
+    def load_song():
+        if Player.QUEUE == []: return
+        Player.song = Player.QUEUE[0]
+        Player.QUEUE.pop(0)
+        Player.song.load()
+        Window.progress_bar.configure(maximum=Player.song.length)
+
+        thread = threading.Thread(target=Player.play_song)
+        thread.start()
+
+    def toggle_pause():
+        if Player.PLAYING:
             Window.pause_label.configure(image=Images.play)
         else:
             Window.pause_label.configure(image=Images.pause)
-            if not self.song or self.song.finished_playing:
-                if self.QUEUE == []: return
-                self.song = self.QUEUE[0]
-                self.QUEUE.pop(0)
-                self.song.load()
+            if not Player.song or Player.song.finished_playing:
+                Player.load_song()
                 
-                thread = threading.Thread(target=self.play_song)
-                thread.start()
+                
 
-        self.PLAYING = not self.PLAYING
+        Player.PLAYING = not Player.PLAYING
+    
+    def skip_song():
+        Player.song.progress = Player.song.length
+
+# INIT WINDOW
+
+def open_file():
+    filepath = askopenfilename(initialdir="~",filetypes=(("Audio file", "*.mp3 *.wav *.aac *.mp4 *.ogg"), ("","")))
+
+    filetype = filepath.split(".")[-1]
+
+    tags = music_tag.load_file(filepath)
+    title = tags["tracktitle"]
+    artist = tags["artist"]
+    album = tags["album"]
+    length_secs = float(str(tags["#length"])) * 60
+
+    img = tags["artwork"]
+
+    pil_img = img.first.thumbnail([512,512])
+
+    Player.add_to_queue(Song(source=filetype, title=title, author=artist, album=album, length=length_secs, link=filepath, image=pil_img))
+
+init_after_player(open_file)
