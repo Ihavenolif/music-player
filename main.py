@@ -1,13 +1,14 @@
-from PIL import Image
+import modules.window as Window
 
-from classes.window import Window
-from classes.song import Song
-from classes.player import Player
+from modules.song import Song
+from modules.player import init_player
 
-Player.QUEUE.append(Song(source="mp3", title="kokot", author="kokotos", album="albumos", length=330, link="shortened_lorna.mp3", image=Image.new("RGB", (1000,1000), (255,255,255))))
-Player.QUEUE.append(Song(source="wav", title="kokot", author="kokotos", album="albumos", length=330, link="temp.wav", image=Image.new("RGB", (1000,1000), (255,255,255))))
+player = init_player()
 
-Window.pause_label.bind("<Button-1>", lambda e:Player.toggle_pause())
-Window.next_label.bind("<Button-1>", lambda e:Player.skip_song())
+Window.set_global_player_reference(player)
+
+Window.TK.bind("<space>", lambda e:Window.toggle_pause())
+Window.pause_label.bind("<Button-1>", lambda e:Window.toggle_pause())
+Window.next_label.bind("<Button-1>", lambda e:Window.skip_song())
 
 Window.start_loop()

@@ -1,4 +1,6 @@
 librespot
-pyaudio
+#pyaudio
 pydub
-tkinter
+#tkinter
+pillow
+music_tag
