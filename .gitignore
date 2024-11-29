@@ -2,3 +2,7 @@
 main.spec
 build/*
 dist*
+venv*
+.vscode
+launch.json
+credentials.json
