@@ -14,10 +14,16 @@
 #include <signal.h>
 #include <string.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <termios.h>
+
 #include <spa/param/audio/format-utils.h>
 
 #include <pipewire/pipewire.h>
 #include <fftw3.h>
+
+#define SAMPLE_RATE 48000
 
 struct histogramCell
 {
@@ -25,7 +31,22 @@ struct histogramCell
     float sum;
 };
 
-void processSamples(const float *data, size_t size)
+/*int serial_write(int serialPort, void *data, size_t size)
+{
+    return 0;
+}*/
+
+struct data
+{
+    struct pw_main_loop *loop;
+    struct pw_stream *stream;
+
+    struct spa_audio_info format;
+    unsigned move : 1;
+    int serialPort;
+};
+
+void processSamples(const float *samples, size_t size, struct data *data)
 {
     // Allocate memory for input and output arrays
     fftw_complex *in, *out;
@@ -36,7 +57,7 @@ void processSamples(const float *data, size_t size)
 
     for (size_t i = 0; i < size; i++)
     {
-        in[i][0] = data[i] * 0.5 * (1 - cos(2 * 3.14 * i / (size - 1)));
+        in[i][0] = samples[i] * 0.5 * (1 - cos(2 * 3.14 * i / (size - 1)));
         in[i][1] = 0.0;
     }
 
@@ -46,24 +67,34 @@ void processSamples(const float *data, size_t size)
 
     // int *frequencies = malloc(sizeof(unsigned int) * size);
     // int *amplitudes = malloc(sizeof(unsigned int) * size);
-    int frequencyBreakpoints[] = {50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000};
-    struct histogramCell histogram[9];
-    for (int i = 0; i < 9; i++)
+    int breakpointCount = 15; // n
+    int *frequencyBreakpoints = malloc(sizeof(int) * breakpointCount);
+    struct histogramCell *histogram = malloc(sizeof(struct histogramCell) * breakpointCount);
+    for (int k = 0; k < breakpointCount; k++)
     {
-        histogram[i].count = 0;
-        histogram[i].sum = 0.0f;
+        histogram[k].count = 0;
+        histogram[k].sum = 0.0f;
+
+        frequencyBreakpoints[k] = pow(10, 1.8 + (((float)k / (float)breakpointCount) * 2.75));
+        // frequencyBreakpoints[k] = exp(3.9 + (((float)k / (float)breakpointCount) * 6.3));
     }
 
-    printf("Forward FFT:\n");
+    frequencyBreakpoints[breakpointCount - 1] = 20000;
+    histogram[breakpointCount - 1].count = 0;
+    histogram[breakpointCount - 1].sum = 0.0f;
+
+    // fprintf(stdout, "%c[%dA", 0x1b, 9 + 1);
+
+    fprintf(stdout, "Forward FFT:\n");
     for (int i = 1; i < (size); i++)
     {
-        int freq = (i * 44100) / (size / 2);
+        int freq = (i * SAMPLE_RATE) / (size / 2);
         if (freq > 20000)
             continue;
         float amplitude = log10(sqrt(out[i][0] * out[i][0] + out[i][1] * out[i][1]) + 1); //  + out[i][1] * out[i][1]
 
         int histogramId = 8;
-        for (int j = 0; j < 9; j++)
+        for (int j = 0; j < breakpointCount; j++)
         {
             if (freq < frequencyBreakpoints[j])
             {
@@ -81,24 +112,41 @@ void processSamples(const float *data, size_t size)
         //  printf("out[%d] = %f + %fi\n", i, out[i][0], out[i][1]);
     }
 
-    for (size_t i = 0; i < 9; i++)
+    char *stripData = malloc(breakpointCount);
+
+    for (size_t i = 0; i < breakpointCount; i++)
     {
-        printf("Frequency: %d, Amplitude: %f\n", frequencyBreakpoints[i], histogram[i].sum / histogram[i].count);
+        int frequency = frequencyBreakpoints[i];
+        float amplitude = histogram[i].sum / histogram[i].count;
+        char *bar = malloc(21);
+        memset(bar, ' ', 20);
+        bar[0] = '|';
+        bar[19] = '|';
+        bar[20] = 0;
+        int bar_count = round((20 / 3) * amplitude);
+        for (int j = 1; j < bar_count; j++)
+        {
+            bar[j] = '#';
+        }
+        fprintf(stdout, "Frequency: %5dHz, Amplitude: %2.2f %s\n", frequencyBreakpoints[i], amplitude, bar);
+        // char buf[1] = {((255 / 3) * amplitude)};
+        stripData[i] = (255 / 3) * amplitude;
+        // write(data->serialPort, buf, 1);
+        free(bar);
     }
+
+    write(data->serialPort, stripData, breakpointCount);
+
+    free(stripData);
+    free(frequencyBreakpoints);
+    free(histogram);
+
+    fflush(stdout);
 
     fftw_destroy_plan(plan_forward);
     fftw_free(in);
     fftw_free(out);
 }
-
-struct data
-{
-    struct pw_main_loop *loop;
-    struct pw_stream *stream;
-
-    struct spa_audio_info format;
-    unsigned move : 1;
-};
 
 /* our data processing function is in general:
  *
@@ -148,7 +196,7 @@ static void on_process(void *userdata)
     data->move = true;
     fflush(stdout);
 
-    processSamples(samples, n_samples);
+    processSamples(samples, n_samples, data);
 
     pw_stream_queue_buffer(data->stream, b);
 }
@@ -198,9 +246,84 @@ int main(int argc, char *argv[])
         0,
     };
     const struct spa_pod *params[1];
-    uint8_t buffer[1024];
+    uint8_t buffer[2048];
     struct pw_properties *props;
     struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+
+    if (serial_port < 0)
+    {
+        printf("Error opening the serial port: %s\n", strerror(errno));
+        return 1;
+    }
+
+    struct termios tty;
+
+    // Get the current configuration of the serial port
+    if (tcgetattr(serial_port, &tty) != 0)
+    {
+        printf("Error getting serial port attributes: %s\n", strerror(errno));
+        return 1;
+    }
+
+    // Set Baud Rate
+    cfsetispeed(&tty, B9600); // Input baud rate (9600 baud)
+    cfsetospeed(&tty, B9600); // Output baud rate (9600 baud)
+
+    // Set 8 data bits, no parity, 1 stop bit
+    tty.c_cflag &= ~PARENB; // No parity
+    tty.c_cflag &= ~CSTOPB; // 1 stop bit
+    tty.c_cflag &= ~CSIZE;  // Mask the character size bits
+    tty.c_cflag |= CS8;     // Set 8 data bits
+
+    // Disable hardware flow control (RTS/CTS)
+    // tty.c_cflag &= ~CRTSCTS;
+
+    // Set local mode and enable receiver
+    tty.c_cflag |= CREAD | CLOCAL;
+
+    // Disable software flow control
+    tty.c_iflag &= ~(IXON | IXOFF | IXANY);
+
+    // Set raw input mode (disable canonical mode)
+    tty.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+
+    // Set raw output mode
+    tty.c_oflag &= ~OPOST;
+
+    // Set timeouts
+    tty.c_cc[VTIME] = 1; // Timeout for read (in deciseconds)
+    tty.c_cc[VMIN] = 1;  // Minimum number of characters to read
+
+    // Apply the settings
+    if (tcsetattr(serial_port, TCSANOW, &tty) != 0)
+    {
+        printf("Error setting serial port attributes: %s\n", strerror(errno));
+        return 1;
+    }
+
+    int buf[1];
+    int n = read(serial_port, buf, 1);
+    if (n < 0)
+    {
+        printf("Error reading from serial port: %s\n", strerror(errno));
+        return 1;
+    }
+
+    data.serialPort = serial_port;
+
+    printf("Waiting for buffer to load\n");
+    sleep(2);
+
+    // Write data to serial port
+    /*char msg[15] = {0xff, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee};
+    n = write(serial_port, msg, 15);
+    if (n < 0)
+    {
+        printf("Error writing to serial port: %s\n", strerror(errno));
+        return 1;
+    }*/
 
     pw_init(&argc, &argv);
 
@@ -226,6 +349,7 @@ int main(int argc, char *argv[])
                               PW_KEY_CONFIG_NAME, "client-rt.conf",
                               PW_KEY_MEDIA_CATEGORY, "Monitor",
                               PW_KEY_MEDIA_ROLE, "Music",
+                              PW_KEY_NODE_LATENCY, "2048/48000",
                               NULL);
     if (argc > 1)
         /* Set stream target if given on command line */
@@ -247,7 +371,9 @@ int main(int argc, char *argv[])
      * rate and channels. */
     params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat,
                                            &SPA_AUDIO_INFO_RAW_INIT(
-                                                   .format = SPA_AUDIO_FORMAT_F32));
+                                                   .format = SPA_AUDIO_FORMAT_F32,
+                                                   .rate = SAMPLE_RATE,
+                                                   .channels = 2));
 
     /* Now connect this stream. We ask that our process function is
      * called in a realtime thread. */
